@@ -1,169 +1,487 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>INGÉNIEUR QSE LYES - SiteCheck Pro</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Inter', sans-serif; }
-        #pdf-capture-root { width: 210mm; min-height: 297mm; padding: 15mm; background: white; color: #0f172a; }
-        .no-break { page-break-inside: avoid; break-inside: avoid; }
-    </style>
-</head>
-<body class="bg-[#F8FAFC]">
-    <div id="root"></div>
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc 
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged,
+  signInWithCustomToken
+} from 'firebase/auth';
+import { 
+  ShieldCheck, 
+  HardHat, 
+  Construction, 
+  Zap, 
+  FileText, 
+  Plus, 
+  Trash2, 
+  Printer, 
+  ChevronLeft, 
+  Clock, 
+  Save, 
+  Camera, 
+  X, 
+  FileDown, 
+  Briefcase, 
+  Calendar, 
+  AlertTriangle,
+  Loader2,
+  CheckCircle2
+} from 'lucide-react';
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import React, { useState, useEffect, useRef } from "https://esm.sh/react@18.2.0";
-        import ReactDOM from "https://esm.sh/react-dom@18.2.0/client";
-        import * as LucideIcons from "https://esm.sh/lucide-react@0.344.0";
+// --- CONFIGURATION FIREBASE ---
+// Note: Ces variables sont fournies par l'environnement de test. 
+// Pour Vercel, remplacez par votre propre configuration JSON.
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'sitecheck-lyes-qse-pro';
 
-        const { ShieldCheck, HardHat, Construction, Zap, FileText, Plus, Trash2, Printer, ChevronLeft, Clock, Save, Camera, X, FileDown, Briefcase, Calendar, AlertTriangle } = LucideIcons;
+const DEFAULT_SECTIONS = [
+  {
+    id: 1,
+    title: "SÉCURITÉ SUR SITE (S)",
+    icon: "HardHat",
+    items: [
+      { id: 101, label: "Signalisation et balisage de zone", status: "none", comment: "", photos: [] },
+      { id: 102, label: "Port des EPI (Casque, gilet, gants)", status: "none", comment: "", photos: [] },
+      { id: 103, label: "Échafaudages et protections collectives", status: "none", comment: "", photos: [] }
+    ]
+  },
+  {
+    id: 2,
+    title: "CONTRÔLE QUALITÉ (Q)",
+    icon: "ShieldCheck",
+    items: [
+      { id: 201, label: "Ferraillage (Diamètre, espacement, propreté)", status: "none", comment: "", photos: [] },
+      { id: 202, label: "Conformité du coffrage et niveaux", status: "none", comment: "", photos: [] },
+      { id: 203, label: "Vérification des bons de livraison béton", status: "none", comment: "", photos: [] }
+    ]
+  },
+  {
+    id: 3,
+    title: "RESPECT ENVIRONNEMENTAL (E)",
+    icon: "Construction",
+    items: [
+      { id: 301, label: "Gestion des bennes et tri des déchets", status: "none", comment: "", photos: [] },
+      { id: 302, label: "Prévention des pollutions (Sols/Eaux)", status: "none", comment: "", photos: [] }
+    ]
+  }
+];
 
-        // --- ATTENTION : CONFIGURATION FIREBASE ---
-        // Pour que l'app fonctionne sur Vercel, vous devez créer un projet sur console.firebase.google.com
-        // et remplacer les "" ci-dessous par vos clés. 
-        // Si vous laissez vide, l'app affichera une alerte mais vous pourrez tester le design.
-        const firebaseConfig = {
-            apiKey: "",
-            authDomain: "",
-            projectId: "",
-            storageBucket: "",
-            messagingSenderId: "",
-            appId: ""
-        };
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('dashboard');
+  const [projects, setProjects] = useState([]);
+  const [currentProject, setCurrentProject] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [deleteId, setDeleteId] = useState(null);
+  const fileInputRef = useRef(null);
+  const [activeItemRef, setActiveItemRef] = useState(null);
 
-        const App = () => {
-            const [user, setUser] = useState(null);
-            const [view, setView] = useState('dashboard');
-            const [projects, setProjects] = useState([]);
-            const [currentProject, setCurrentProject] = useState(null);
-            const [isDownloading, setIsDownloading] = useState(false);
-            const [isSaving, setIsSaving] = useState(false);
-            const [deleteId, setDeleteId] = useState(null);
-            const fileInputRef = useRef(null);
-            const [activeItemRef, setActiveItemRef] = useState(null);
+  // Initialisation Auth
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-            useEffect(() => {
-                if (firebaseConfig.apiKey) {
-                    const app = initializeApp(firebaseConfig);
-                    const auth = getAuth(app);
-                    signInAnonymously(auth);
-                    onAuthStateChanged(auth, setUser);
-                }
-            }, []);
+  // Synchronisation Firestore
+  useEffect(() => {
+    if (!user) return;
+    const q = collection(db, 'artifacts', appId, 'public', 'data', 'inspections');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setProjects(list.sort((a, b) => b.createdAt - a.createdAt));
+    }, (error) => console.error("Firestore error", error));
+    return () => unsubscribe();
+  }, [user]);
 
-            useEffect(() => {
-                if (!user || !firebaseConfig.apiKey) return;
-                const db = getFirestore();
-                return onSnapshot(collection(db, 'inspections'), (snap) => {
-                    setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-                });
-            }, [user]);
+  // Actions
+  const createNewProject = async () => {
+    if (!user) return;
+    const newDoc = {
+      projectName: "CHANTIER À DÉFINIR",
+      engineerName: "INGÉNIEUR QSE LYES",
+      date: new Date().toISOString().split('T')[0],
+      sections: JSON.parse(JSON.stringify(DEFAULT_SECTIONS)),
+      generalObservations: "",
+      createdAt: Date.now(),
+      createdBy: user.uid
+    };
+    setIsSaving(true);
+    const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'inspections'), newDoc);
+    setCurrentProject({ id: docRef.id, ...newDoc });
+    setView('editor');
+    setIsSaving(false);
+  };
 
-            const createProject = async () => {
-                const newDoc = { projectName: "CHANTIER À DÉFINIR", engineerName: "INGÉNIEUR QSE LYES", date: new Date().toISOString().split('T')[0], sections: [], observations: "", createdAt: Date.now() };
-                if (user) {
-                    const db = getFirestore();
-                    const res = await addDoc(collection(db, 'inspections'), newDoc);
-                    setCurrentProject({ id: res.id, ...newDoc });
-                } else {
-                    setCurrentProject({ id: 'temp', ...newDoc });
-                }
-                setView('editor');
-            };
+  const handleSave = async (data) => {
+    if (!user || !currentProject) return;
+    setIsSaving(true);
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inspections', currentProject.id);
+    await updateDoc(docRef, data);
+    setIsSaving(false);
+  };
 
-            const downloadPDF = async (project) => {
-                setIsDownloading(true);
-                const element = document.getElementById('pdf-capture-root');
-                const opt = { margin: 10, filename: `Rapport_QSE_Lyes.pdf`, image: { type: 'jpeg', quality: 1.0 }, html2canvas: { scale: 2, useCORS: true, windowWidth: 800 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
-                setTimeout(() => {
-                    html2pdf().set(opt).from(element).save().then(() => setIsDownloading(false));
-                }, 2000);
-            };
+  const downloadPDF = async (project) => {
+    // Chargement dynamique de la librairie au besoin
+    if (!window.html2pdf) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      document.body.appendChild(script);
+      await new Promise(r => script.onload = r);
+    }
 
-            if (!firebaseConfig.apiKey && view === 'dashboard' && projects.length === 0) {
-                return (
-                    <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-10 text-center">
-                        <div>
-                            <ShieldCheck className="w-20 h-20 text-cyan-400 mx-auto mb-6" />
-                            <h1 className="text-3xl font-black mb-4 uppercase">INGÉNIEUR QSE LYES</h1>
-                            <p className="text-slate-400 mb-8">L'application est prête, mais vous devez configurer votre base de données Firebase pour sauvegarder vos rapports.</p>
-                            <button onClick={createProject} className="bg-cyan-600 px-8 py-3 rounded-full font-bold uppercase tracking-widest shadow-lg">Tester le mode démo</button>
-                        </div>
+    setIsDownloading(true);
+    const element = document.getElementById('pdf-layout');
+    
+    const opt = {
+      margin: 10,
+      filename: `Rapport_QSE_Lyes_${(project.projectName || 'Chantier').replace(/\s+/g, '_')}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, windowWidth: 800 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+    };
+
+    setTimeout(async () => {
+      try {
+        await window.html2pdf().set(opt).from(element).save();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsDownloading(false);
+      }
+    }, 1500);
+  };
+
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file || !activeItemRef) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result;
+      const { sId, iId } = activeItemRef;
+      const newSections = currentProject.sections.map(s => s.id === sId ? {
+        ...s, items: s.items.map(i => i.id === iId ? { 
+          ...i, photos: [...(i.photos || []), base64] 
+        } : i)
+      } : s);
+      setCurrentProject(p => ({ ...p, sections: newSections }));
+      handleSave({ sections: newSections });
+      setActiveItemRef(null);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const renderIcon = (name) => {
+    const icons = { HardHat, Construction, Zap, ShieldCheck, Briefcase };
+    const Comp = icons[name] || FileText;
+    return <Comp size={24} />;
+  };
+
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+      <Loader2 className="w-10 h-10 text-cyan-500 animate-spin" />
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+      
+      {/* DASHBOARD */}
+      {view === 'dashboard' && (
+        <div className="animate-in fade-in duration-500">
+          <header className="bg-slate-900 border-b border-slate-800 h-20 sticky top-0 z-40 px-8 flex items-center shadow-xl">
+            <div className="max-w-7xl mx-auto w-full flex justify-between items-center">
+              <div className="flex items-center gap-4 text-white">
+                <div className="bg-cyan-600 p-2.5 rounded-xl shadow-lg">
+                  <ShieldCheck size={26} />
+                </div>
+                <div>
+                  <h1 className="text-xl font-black tracking-tighter leading-none">INGÉNIEUR QSE <span className="text-cyan-400">LYES</span></h1>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Audit & Conformité Chantier</p>
+                </div>
+              </div>
+              <button onClick={createNewProject} className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3 rounded-2xl transition-all font-bold text-sm shadow-lg shadow-cyan-900/40 flex items-center gap-2 active:scale-95">
+                <Plus size={18} /> Nouvelle Mission
+              </button>
+            </div>
+          </header>
+
+          <main className="max-w-7xl mx-auto px-8 pt-12">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {projects.length === 0 ? (
+                <div className="col-span-full py-40 text-center bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
+                  <Briefcase size={48} className="text-slate-200 mx-auto mb-4" />
+                  <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Aucun dossier enregistré</p>
+                </div>
+              ) : (
+                projects.map(p => (
+                  <div key={p.id} onClick={() => { setCurrentProject(p); setView('editor'); }} className="bg-white rounded-[2.5rem] border border-slate-200 p-8 shadow-sm hover:shadow-2xl hover:border-cyan-500/30 transition-all cursor-pointer group relative">
+                    <div className="flex justify-between items-start mb-10">
+                      <div className="bg-slate-50 text-slate-400 w-14 h-14 rounded-2xl flex items-center justify-center group-hover:bg-slate-900 group-hover:text-cyan-400 transition-all duration-500">
+                        <FileText size={28} />
+                      </div>
+                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={(e) => { e.stopPropagation(); downloadPDF(p); }} className="bg-slate-50 text-slate-400 hover:text-cyan-600 p-2.5 rounded-xl border border-slate-100"><Printer size={18} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); setDeleteId(p.id); }} className="bg-slate-50 text-slate-400 hover:text-red-600 p-2.5 rounded-xl border border-slate-100"><Trash2 size={18} /></button>
+                      </div>
                     </div>
-                );
-            }
+                    <h3 className="font-black text-slate-900 text-lg uppercase truncate mb-1 group-hover:text-cyan-700 transition-colors">{p.projectName || "Mission Sans Nom"}</h3>
+                    <div className="flex items-center gap-2 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
+                      <Calendar size={12} className="text-cyan-500" /> {p.date}
+                    </div>
+                    <div className="mt-8 pt-6 border-t border-slate-50 flex items-center justify-between text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                      Ouvrir le dossier QSE
+                      <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-cyan-600 group-hover:text-white transition-all">→</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </main>
+        </div>
+      )}
 
-            if (view === 'dashboard') return (
-                <div className="min-h-screen">
-                    <header className="bg-slate-900 h-20 flex items-center px-8 shadow-xl text-white justify-between sticky top-0 z-50">
-                        <div className="flex items-center gap-4">
-                            <div className="bg-cyan-600 p-2.5 rounded-xl shadow-lg"><ShieldCheck size={24} /></div>
-                            <div>
-                                <h1 className="text-xl font-black uppercase tracking-tighter">INGÉNIEUR QSE <span className="text-cyan-400">LYES</span></h1>
-                            </div>
-                        </div>
-                        <button onClick={createProject} className="bg-cyan-600 px-6 py-2.5 rounded-2xl font-black text-xs uppercase shadow-lg">Nouvelle Mission</button>
-                    </header>
-                    <main className="max-w-7xl mx-auto px-8 pt-12 pb-20 text-center">
-                         {projects.length === 0 && <p className="text-slate-400 italic">Aucun rapport. Cliquez sur "Nouvelle Mission".</p>}
-                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-left">
-                            {projects.map(p => (
-                                <div key={p.id} onClick={() => { setCurrentProject(p); setView('editor'); }} className="bg-white p-8 rounded-[2rem] border border-slate-200 cursor-pointer hover:shadow-2xl transition-all">
-                                    <h3 className="font-black uppercase text-slate-800 truncate">{p.projectName}</h3>
-                                    <p className="text-slate-400 text-xs mt-2">{p.date}</p>
-                                </div>
+      {/* EDITOR */}
+      {view === 'editor' && currentProject && (
+        <div className="animate-in slide-in-from-right-4 duration-300 pb-32">
+          <header className="bg-white/80 backdrop-blur-xl border-b border-slate-200 h-20 sticky top-0 z-40 px-8 flex items-center shadow-sm">
+            <div className="max-w-5xl mx-auto w-full flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                <button onClick={() => setView('dashboard')} className="p-3 hover:bg-slate-100 rounded-2xl text-slate-500 transition-all border border-slate-100 shadow-sm active:scale-90"><ChevronLeft size={24} /></button>
+                <div>
+                  <h2 className="text-xs font-black text-slate-900 uppercase tracking-widest truncate max-w-[200px]">{currentProject.projectName}</h2>
+                  <div className="flex items-center gap-1.5">
+                    {isSaving ? <Clock size={10} className="text-cyan-500 animate-spin" /> : <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>}
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{isSaving ? "Sync..." : "Données sécurisées"}</span>
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => downloadPDF(currentProject)} className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-2xl transition-all font-bold text-sm shadow-xl flex items-center gap-2 active:scale-95">
+                <FileDown size={18} className="text-cyan-400" /> Télécharger PDF
+              </button>
+            </div>
+          </header>
+
+          <main className="max-w-5xl mx-auto px-8 pt-10">
+            <section className="bg-white rounded-[2.5rem] border border-slate-200 p-10 mb-12 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-cyan-600 uppercase tracking-widest px-1">Nom du Chantier</label>
+                <input type="text" value={currentProject.projectName} onChange={(e) => { const v = e.target.value.toUpperCase(); setCurrentProject(p=>({...p, projectName:v})); handleSave({projectName:v}); }} className="w-full bg-slate-50 border-none rounded-2xl px-5 py-4 font-black text-slate-800 focus:ring-2 focus:ring-cyan-600 transition-all" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-cyan-600 uppercase tracking-widest px-1">Date d'inspection</label>
+                <input type="date" value={currentProject.date} onChange={(e) => { const v = e.target.value; setCurrentProject(p=>({...p, date:v})); handleSave({date:v}); }} className="w-full bg-slate-50 border-none rounded-2xl px-5 py-4 font-bold text-slate-800 focus:ring-2 focus:ring-cyan-600 transition-all" />
+              </div>
+            </section>
+
+            <div className="space-y-12">
+              {currentProject.sections.map(s => (
+                <div key={s.id} className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
+                  <div className="bg-slate-900 px-10 py-5 flex items-center gap-4 border-l-[12px] border-cyan-500">
+                    <div className="text-cyan-400">{renderIcon(s.icon)}</div>
+                    <h3 className="font-black text-white uppercase text-[11px] tracking-[0.2em]">{s.title}</h3>
+                  </div>
+                  <div className="divide-y divide-slate-50">
+                    {s.items.map(item => (
+                      <div key={item.id} className="p-10 hover:bg-slate-50/50 transition-colors">
+                        <div className="flex flex-col lg:flex-row justify-between gap-10 mb-8">
+                          <div className="flex-grow">
+                            <p className="font-bold text-slate-900 text-lg mb-2">{item.label}</p>
+                            <textarea rows="1" value={item.comment} placeholder="Observations techniques QSE..." onChange={(e) => {
+                              const v = e.target.value;
+                              const newS = currentProject.sections.map(sec => sec.id === s.id ? { ...sec, items: sec.items.map(i => i.id === item.id ? { ...i, comment: v } : i) } : sec);
+                              setCurrentProject(p=>({...p, sections:newS})); handleSave({sections:newS});
+                            }} className="w-full bg-transparent border-b border-slate-100 py-1 focus:outline-none focus:border-cyan-600 text-sm italic text-slate-400 font-medium" />
+                          </div>
+                          <div className="flex gap-2">
+                            {['ok', 'issue', 'na'].map(st => (
+                              <button 
+                                key={st} 
+                                onClick={() => {
+                                  const newS = currentProject.sections.map(sec => sec.id === s.id ? { ...sec, items: sec.items.map(i => i.id === item.id ? { ...i, status: st } : i) } : sec);
+                                  setCurrentProject(p=>({...p, sections:newS})); handleSave({sections:newS});
+                                }} 
+                                className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                                  item.status === st 
+                                  ? (st === 'ok' ? 'bg-green-600 text-white shadow-lg' : st === 'issue' ? 'bg-red-600 text-white shadow-lg' : 'bg-slate-900 text-white shadow-lg') 
+                                  : 'bg-slate-50 text-slate-300 hover:bg-slate-100'
+                                } active:scale-95`}
+                              >
+                                {st === 'ok' ? 'Conforme' : st === 'issue' ? 'Réserve' : 'N/A'}
+                              </button>
                             ))}
-                         </div>
-                    </main>
-                </div>
-            );
-
-            return (
-                <div className="min-h-screen">
-                    <header className="bg-white border-b h-20 sticky top-0 z-50 flex items-center px-8 justify-between">
-                        <button onClick={() => setView('dashboard')} className="p-3 hover:bg-slate-100 rounded-xl">←</button>
-                        <button onClick={() => downloadPDF(currentProject)} className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center gap-3">
-                            <FileDown size={20} className="text-cyan-400" /> Télécharger PDF
-                        </button>
-                    </header>
-                    <main className="max-w-4xl mx-auto px-8 py-12">
-                        <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border mb-10">
-                            <label className="text-[10px] font-black text-cyan-600 uppercase tracking-widest">Nom du Chantier</label>
-                            <input type="text" value={currentProject.projectName} onChange={e => setCurrentProject({...currentProject, projectName: e.target.value})} className="w-full bg-slate-50 p-5 rounded-2xl font-black text-slate-800 uppercase outline-none mt-2" />
+                          </div>
                         </div>
-                        <p className="text-center text-slate-400 italic">Remplissez vos contrôles et ajoutez vos photos...</p>
-                    </main>
-                    {/* Le reste du code de l'éditeur ici... */}
-                    
-                    <div id="pdf-capture-root" style={{ position: 'fixed', top: 0, left: 0, opacity: 0, pointerEvents: 'none' }}>
-                         <div className="p-10 border-b-8 border-slate-900 mb-10">
-                            <h1 className="text-4xl font-black uppercase">RAPPORT TECHNIQUE QSE</h1>
-                            <p className="text-cyan-600 font-bold uppercase tracking-widest">INGÉNIEUR LYES</p>
-                         </div>
-                         <p className="text-2xl font-bold uppercase mb-4">Chantier : {currentProject.projectName}</p>
-                         <p>Date : {currentProject.date}</p>
+                        <div className="flex flex-wrap gap-4">
+                          {(item.photos || []).map((ph, idx) => (
+                            <div key={idx} className="relative group w-24 h-24 border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                              <img src={ph} className="w-full h-full object-cover" alt="preuve" />
+                              <button onClick={() => {
+                                const newS = currentProject.sections.map(sec => sec.id === s.id ? { ...sec, items: sec.items.map(i => i.id === item.id ? { ...i, photos: i.photos.filter((_, pi) => pi !== idx) } : i) } : sec);
+                                setCurrentProject(p=>({...p, sections:newS})); handleSave({sections:newS});
+                              }} className="absolute inset-0 bg-red-600/80 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all"><X size={20}/></button>
+                            </div>
+                          ))}
+                          <button onClick={() => { setActiveItemRef({sId:s.id, iId:item.id}); fileInputRef.current.click(); }} className="w-24 h-24 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-300 hover:text-cyan-600 hover:border-cyan-300 transition-all bg-slate-50/50">
+                            <Camera size={24} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <section className="bg-white rounded-[2.5rem] border border-slate-200 p-10 shadow-sm">
+                <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-8 px-2 border-l-4 border-cyan-600">Synthèse Finale de l'Expert QSE</h2>
+                <textarea rows="6" value={currentProject.generalObservations} onChange={(e) => { const v = e.target.value; setCurrentProject(p=>({...p, generalObservations:v})); handleSave({generalObservations:v}); }} className="w-full bg-slate-50 border-none rounded-3xl p-8 text-sm font-medium focus:ring-2 focus:ring-cyan-600 transition-all text-slate-700 leading-relaxed" placeholder="État global, conformité du site et mesures d'urgence..." />
+              </section>
+            </div>
+            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handlePhotoUpload} />
+          </main>
+        </div>
+      )}
+
+      {/* OVERLAY TÉLÉCHARGEMENT */}
+      {isDownloading && (
+        <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
+          <div className="bg-white rounded-[2.5rem] p-12 text-center shadow-2xl animate-in zoom-in-95 max-w-sm">
+            <Loader2 className="w-16 h-16 text-cyan-600 animate-spin mx-auto mb-6" />
+            <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Édition du Rapport PDF</h3>
+            <p className="text-slate-500 text-sm mt-3 font-medium italic">Ingénieur QSE LYES finalise votre expertise...</p>
+          </div>
+        </div>
+      )}
+
+      {/* PDF CAPTURE AREA (Hidden from view but in DOM) */}
+      <div style={{ position: 'fixed', top: '100vh', left: 0, width: '210mm', opacity: 1, zIndex: -1 }}>
+        <div id="pdf-layout" className="bg-white p-12 text-slate-900 font-sans" style={{ width: '210mm', minHeight: '297mm', padding: '15mm' }}>
+          {currentProject && (
+            <>
+              <div className="flex justify-between items-center mb-10 border-b-[6px] border-slate-900 pb-8">
+                <div>
+                  <div className="text-cyan-700 font-black uppercase tracking-[0.4em] text-[10px] mb-2">Expertise Qualité Sécurité Environnement</div>
+                  <h1 className="text-4xl font-black text-slate-900 uppercase leading-none tracking-tighter">RAPPORT DE VISITE</h1>
+                </div>
+                <div className="text-right">
+                  <div className="text-[22px] font-black text-slate-900 leading-tight uppercase">INGÉNIEUR QSE <span className="text-cyan-600">LYES</span></div>
+                  <div className="text-[8px] text-slate-400 mt-2 uppercase font-black tracking-[0.2em] italic">Contrôle de Conformité Chantier</div>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-10 rounded-[2rem] border border-slate-100 grid grid-cols-2 gap-10 mb-12">
+                <div className="border-l-[6px] border-cyan-600 pl-5 py-1">
+                   <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">CHANTIER / PROJET</p>
+                   <p className="font-black text-slate-900 text-xl uppercase leading-tight">{currentProject.projectName || "NON DÉFINI"}</p>
+                </div>
+                <div className="border-l-[6px] border-slate-300 pl-5 py-1">
+                   <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">DATE DE L'INSPECTION</p>
+                   <p className="font-black text-slate-900 text-lg uppercase">{currentProject.date}</p>
+                </div>
+              </div>
+
+              <div className="space-y-12">
+                {currentProject.sections.map(s => (
+                  <div key={s.id} className="page-break-avoid" style={{ pageBreakInside: 'avoid' }}>
+                    <div className="bg-slate-900 text-white px-8 py-3.5 font-black uppercase text-[11px] tracking-[0.3em] mb-8 border-l-[14px] border-cyan-500 rounded-r-2xl">
+                      {s.title}
                     </div>
-
-                    {isDownloading && (
-                        <div className="fixed inset-0 bg-slate-950/95 flex flex-col items-center justify-center z-[500] text-white text-center p-10 backdrop-blur-xl">
-                            <Loader2 className="w-16 h-16 text-cyan-500 animate-spin mb-6" />
-                            <h3 className="text-2xl font-black uppercase">Génération PDF...</h3>
+                    <div className="space-y-10">
+                      {s.items.map(item => (
+                        <div key={item.id} className="border-b-2 border-slate-50 pb-8 last:border-0" style={{ pageBreakInside: 'avoid' }}>
+                          <div className="flex justify-between items-start mb-6 gap-6">
+                            <p className="font-black text-slate-900 text-[15px] flex-grow uppercase leading-tight">{item.label}</p>
+                            <div className={`text-[9px] font-black uppercase px-4 py-1.5 border-2 rounded-xl shrink-0 tracking-widest ${item.status === 'ok' ? 'border-green-600 text-green-700 bg-green-50' : item.status === 'issue' ? 'border-red-600 text-red-700 bg-red-50' : 'border-slate-200 text-slate-300'}`}>
+                              {item.status === 'ok' ? 'CONFORME' : item.status === 'issue' ? 'RÉSERVE' : 'N/A'}
+                            </div>
+                          </div>
+                          {item.comment && (
+                            <div className="bg-slate-50 p-6 rounded-2xl border-l-4 border-slate-200 mb-6 italic text-slate-600 text-sm">
+                              "{item.comment}"
+                            </div>
+                          )}
+                          {item.photos?.length > 0 && (
+                            <div className="grid grid-cols-2 gap-4">
+                              {item.photos.map((ph, i) => (
+                                <div key={i} className="aspect-video rounded-2xl border-4 border-white shadow-md overflow-hidden">
+                                  <img src={ph} className="w-full h-full object-cover" alt="preuve" />
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                    )}
-                </div>
-            );
-        };
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
 
-        const root = ReactDOM.createRoot(document.getElementById("root"));
-        root.render(React.createElement(App));
-    </script>
-</body>
-</html>
+              <div className="mt-20 pt-10 border-t-[8px] border-slate-900" style={{ pageBreakInside: 'avoid' }}>
+                <h3 className="text-[13px] font-black uppercase tracking-[0.4em] text-cyan-800 mb-6">SYNTHÈSE ET CONCLUSIONS QSE</h3>
+                <div className="bg-slate-900 text-white p-12 rounded-[3rem] shadow-2xl relative overflow-hidden">
+                   <div className="absolute top-0 left-0 w-2 h-full bg-cyan-500"></div>
+                   <p className="text-[15px] leading-[1.7] font-bold italic text-center">
+                     {currentProject.generalObservations || "Contrôle de conformité validé."}
+                   </p>
+                </div>
+              </div>
+
+              <div className="mt-20 grid grid-cols-2 gap-16" style={{ pageBreakInside: 'avoid' }}>
+                <div className="border-t-2 border-slate-200 pt-8">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-24">Visa de l'Ingénieur QSE LYES</p>
+                  <div className="italic text-slate-300 text-[10px] font-bold uppercase tracking-widest">Signé Numériquement</div>
+                </div>
+                <div className="border-t-2 border-slate-200 pt-8 text-right">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-24">Visa Client / Entreprise</p>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* MODAL SUPPRESSION */}
+      {deleteId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4">
+          <div className="bg-white rounded-[2.5rem] p-12 max-w-sm w-full shadow-2xl animate-in zoom-in-95">
+            <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-6" />
+            <h3 className="text-xl font-black text-slate-900 uppercase text-center mb-2">Supprimer ?</h3>
+            <p className="text-slate-500 text-center mb-10 text-sm font-medium">Les données techniques seront effacées.</p>
+            <div className="flex gap-4">
+              <button onClick={() => setDeleteId(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black uppercase text-[10px] rounded-2xl">Annuler</button>
+              <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inspections', deleteId)); setDeleteId(null); }} className="flex-1 py-4 bg-red-600 text-white font-black uppercase text-[10px] rounded-2xl shadow-xl shadow-red-200">Supprimer</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
