@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>INGÉNIEUR QSE LYES - SiteCheck Pro</title>
     
-    <!-- Frameworks & Bibliothèques (Chargement Global UMD) -->
+    <!-- Frameworks & Bibliothèques (UMD Globals) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Firebase Compat (Stable pour fichier unique) -->
+    <!-- Firebase Compat -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
@@ -20,16 +20,11 @@
     <!-- Icônes Lucide -->
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; -webkit-font-smoothing: antialiased; }
-        .pdf-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        .pdf-table td { border: 1px solid #e2e8f0; padding: 12px; vertical-align: top; }
         .page-break-avoid { page-break-inside: avoid; break-inside: avoid; }
-        
-        /* Zone de capture PDF invisible pour l'utilisateur */
         #pdf-render-zone {
             position: absolute;
             left: -20000px;
@@ -38,26 +33,18 @@
             background: white;
             visibility: visible;
         }
-
-        /* Effet de brillance sur les boutons */
-        .btn-premium {
-            position: relative;
-            overflow: hidden;
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
         }
-        .btn-premium::after {
-            content: '';
-            position: absolute;
-            top: -50%; left: -50%; width: 200%; height: 200%;
-            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
-            transform: rotate(45deg);
-            transition: 0.5s;
+        .btn-google {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        .btn-premium:hover::after { left: 120%; }
-        
-        /* Scrollbar élégante */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .btn-google:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
     </style>
 </head>
 <body class="bg-[#F8FAFC]">
@@ -67,7 +54,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- CONFIGURATION FIREBASE (VÉRIFIEZ VOS CLÉS ICI) ---
+        // --- CONFIGURATION FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyBq9OHMv0eIx6p2eSLXlYIZr0I0XXf57vM",
             authDomain: "lyes-a5acb.firebaseapp.com",
@@ -77,9 +64,8 @@
             appId: "1:454363812073:web:0e6ebbba8ae112a921a078"
         };
 
-        const AppId = "lyes-qse-prod"; // ID Unique de votre application
+        const AppId = "lyes-qse-prod";
 
-        // Composant Icône Universel
         const Icon = ({ name, size = 24, className = "" }) => {
             useEffect(() => {
                 if (window.lucide) window.lucide.createIcons();
@@ -96,58 +82,69 @@
             const [isSaving, setIsSaving] = useState(false);
             const [isDownloading, setIsDownloading] = useState(false);
             const [deleteId, setDeleteId] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
             const fileInputRef = useRef(null);
             const [activeItem, setActiveItem] = useState(null);
 
-            // 1. Initialisation de l'application
+            // Initialisation Firebase & Auth
             useEffect(() => {
                 try {
                     if (!firebase.apps.length) {
                         firebase.initializeApp(firebaseConfig);
                     }
                     const firestore = firebase.firestore();
-                    const auth = firebase.auth();
                     setDb(firestore);
 
-                    auth.onAuthStateChanged(u => {
-                        if (u) {
-                            setUser(u);
-                        } else {
-                            auth.signInAnonymously().catch(console.error);
-                        }
+                    const unsubscribe = firebase.auth().onAuthStateChanged(u => {
+                        setUser(u);
+                        setAuthLoading(false);
                     });
+                    return () => unsubscribe();
                 } catch (e) {
-                    console.error("Firebase init error", e);
+                    console.error("Firebase Init Error", e);
                 }
             }, []);
 
-            // 2. Synchronisation des données (Règles strictes artifacts)
+            // Login Google
+            const login = async () => {
+                const provider = new firebase.auth.GoogleAuthProvider();
+                try {
+                    await firebase.auth().signInWithPopup(provider);
+                } catch (err) {
+                    console.error("Login Error", err);
+                }
+            };
+
+            // Logout
+            const logout = () => firebase.auth().signOut();
+
+            // Synchronisation Firestore
             useEffect(() => {
                 if (!user || !db) return;
-                
                 const q = db.collection('artifacts').doc(AppId).collection('public').doc('data').collection('inspections');
-                
                 const unsubscribe = q.onSnapshot((snap) => {
                     const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                     setProjects(list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
                 }, (err) => console.error("Snapshot error:", err));
-
                 return () => unsubscribe();
             }, [user, db]);
 
             const createProject = async () => {
                 if (!user || !db) return;
                 const newDoc = {
-                    projectName: "CHANTIER À DÉFINIR",
+                    projectName: "NOUVEAU CHANTIER",
                     engineerName: "INGÉNIEUR QSE LYES",
+                    authorName: user.displayName,
+                    authorEmail: user.email,
                     date: new Date().toISOString().split('T')[0],
                     sections: [
-                        { id: 1, title: "SÉCURITÉ SUR SITE (S)", items: [{ id: 101, label: "Port des EPI (Casque, gilet...)", status: "none", comment: "", photos: [] }, { id: 102, label: "Signalisation et balisage", status: "none", comment: "", photos: [] }] },
-                        { id: 2, title: "CONTRÔLE QUALITÉ (Q)", items: [{ id: 201, label: "Conformité du ferraillage", status: "none", comment: "", photos: [] }, { id: 202, label: "Vérification des bétons", status: "none", comment: "", photos: [] }] },
-                        { id: 3, title: "RESPECT ENVIRONNEMENTAL (E)", items: [{ id: 301, label: "Gestion des déchets", status: "none", comment: "", photos: [] }] }
+                        { id: 1, title: "SÉCURITÉ SUR SITE (S)", items: [{ id: 101, label: "Port des EPI", status: "none", comment: "", photos: [] }, { id: 102, label: "Signalisation & Balisage", status: "none", comment: "", photos: [] }] },
+                        { id: 2, title: "CONTRÔLE QUALITÉ (Q)", items: [{ id: 201, label: "Ferraillage & Armatures", status: "none", comment: "", photos: [] }, { id: 202, label: "Coulage & Qualité Béton", status: "none", comment: "", photos: [] }] },
+                        { id: 3, title: "ENVIRONNEMENT (E)", items: [{ id: 301, label: "Gestion & Tri Déchets", status: "none", comment: "", photos: [] }] }
                     ],
                     observations: "",
-                    createdAt: Date.now()
+                    createdAt: Date.now(),
+                    uid: user.uid
                 };
                 const docRef = await db.collection('artifacts').doc(AppId).collection('public').doc('data').collection('inspections').add(newDoc);
                 setCurrentProject({ id: docRef.id, ...newDoc });
@@ -167,14 +164,14 @@
                 const element = document.getElementById('pdf-layout');
                 const opt = {
                     margin: 10,
-                    filename: `RAPPORT_LYES_${(project.projectName || 'Export').replace(/\s+/g, '_')}.pdf`,
+                    filename: `RAPPORT_QSE_LYES_${(project.projectName || 'Export').replace(/\s+/g, '_')}.pdf`,
                     image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+                    html2canvas: { scale: 2, useCORS: true },
                     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
                 };
                 setTimeout(() => {
                     html2pdf().set(opt).from(element).save().then(() => setIsDownloading(false));
-                }, 2000);
+                }, 1500);
             };
 
             const handlePhoto = (e) => {
@@ -191,11 +188,37 @@
                 reader.readAsDataURL(file);
             };
 
-            if (!user) return (
+            // Loading state
+            if (authLoading) return (
                 <div className="min-h-screen flex items-center justify-center bg-[#0F172A]">
                     <div className="text-center">
-                        <div className="w-14 h-14 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-                        <p className="text-cyan-400 font-bold uppercase tracking-[0.4em] text-[10px] animate-pulse">INGÉNIEUR QSE LYES</p>
+                        <div className="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
+                        <p className="text-cyan-400 font-bold uppercase tracking-[0.3em] text-[10px]">INGÉNIEUR QSE LYES</p>
+                    </div>
+                </div>
+            );
+
+            // --- VUE LOGIN ---
+            if (!user) return (
+                <div className="min-h-screen bg-[#0F172A] flex items-center justify-center p-6 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+                        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-500 rounded-full blur-[120px]"></div>
+                        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600 rounded-full blur-[120px]"></div>
+                    </div>
+                    
+                    <div className="max-w-md w-full glass-effect rounded-[3rem] p-12 text-center shadow-2xl relative z-10 border border-white/10">
+                        <div className="bg-slate-900 w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-2xl border border-cyan-500/30">
+                            <Icon name="shield-check" size={48} className="text-cyan-400" />
+                        </div>
+                        <h1 className="text-3xl font-extrabold text-slate-900 uppercase tracking-tighter mb-2">Accès Sécurisé</h1>
+                        <p className="text-slate-500 text-sm mb-10 font-medium">Connectez-vous avec votre compte Google pour accéder au terminal QSE LYES.</p>
+                        
+                        <button onClick={login} className="btn-google w-full bg-white text-slate-700 font-bold py-4 rounded-2xl flex items-center justify-center gap-4 border border-slate-200 shadow-sm mb-6 active:scale-95">
+                            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" />
+                            Continuer avec Google
+                        </button>
+                        
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Bureau Technique • SiteCheck Pro</p>
                     </div>
                 </div>
             );
@@ -205,52 +228,65 @@
                 <div className="min-h-screen">
                     <header className="bg-[#0F172A] h-20 flex items-center px-8 text-white justify-between sticky top-0 z-50 shadow-2xl">
                         <div className="flex items-center gap-4">
-                            <div className="bg-cyan-600 p-2.5 rounded-2xl shadow-lg shadow-cyan-900/40"><Icon name="shield-check" /></div>
+                            <div className="bg-cyan-600 p-2.5 rounded-2xl shadow-lg"><Icon name="shield-check" /></div>
                             <div>
                                 <h1 className="text-xl font-extrabold uppercase tracking-tighter leading-none">INGÉNIEUR QSE <span className="text-cyan-400">LYES</span></h1>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Conformité Technique & Audit</p>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 italic">Poste de contrôle technique</p>
                             </div>
                         </div>
-                        <button onClick={createProject} className="btn-premium bg-cyan-600 hover:bg-cyan-500 px-6 py-2.5 rounded-2xl font-bold uppercase text-[10px] shadow-lg transition-all active:scale-95">Nouveau Rapport</button>
+                        <div className="flex items-center gap-6">
+                            <button onClick={createProject} className="hidden sm:block bg-cyan-600 hover:bg-cyan-500 px-6 py-2.5 rounded-xl font-bold uppercase text-[10px] shadow-lg active:scale-95 transition-all">Nouveau Rapport</button>
+                            <div className="flex items-center gap-3 pl-6 border-l border-white/10 group cursor-pointer" onClick={logout}>
+                                <div className="text-right hidden sm:block">
+                                    <p className="text-[10px] font-bold leading-none">{user.displayName}</p>
+                                    <p className="text-[8px] text-red-400 uppercase font-black tracking-widest mt-1 opacity-0 group-hover:opacity-100 transition-opacity">Déconnexion</p>
+                                </div>
+                                <img src={user.photoURL} className="w-10 h-10 rounded-full border-2 border-cyan-500/50 shadow-lg" />
+                            </div>
+                        </div>
                     </header>
 
                     <main className="max-w-7xl mx-auto px-8 pt-12 pb-24">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
-                            {projects.length === 0 ? (
-                                <div className="col-span-full py-48 text-center bg-white rounded-[3.5rem] border-2 border-dashed border-slate-200">
-                                    <Icon name="folder-open" className="text-slate-200 mx-auto mb-6" size={56} />
-                                    <h3 className="text-slate-400 font-bold uppercase tracking-widest text-xs">Aucune mission enregistrée</h3>
-                                </div>
-                            ) : (
-                                projects.map(p => (
-                                    <div key={p.id} onClick={() => { setCurrentProject(p); setView('editor'); }} className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 cursor-pointer hover:shadow-2xl hover:border-cyan-400/30 transition-all relative group overflow-hidden">
-                                        <div className="absolute top-0 left-0 w-2 h-full bg-slate-100 group-hover:bg-cyan-500 transition-colors"></div>
-                                        <div className="flex justify-between items-start mb-10">
-                                            <div className="bg-slate-50 text-slate-400 w-16 h-16 rounded-3xl flex items-center justify-center group-hover:bg-[#0F172A] group-hover:text-cyan-400 transition-all duration-500 shadow-inner"><Icon name="clipboard-check" size={32} /></div>
-                                            <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0">
-                                                <button onClick={(e) => { e.stopPropagation(); downloadPDF(p); }} className="p-3 bg-slate-50 rounded-2xl hover:text-cyan-600 border border-slate-100 shadow-sm"><Icon name="printer" size={20}/></button>
-                                                <button onClick={(e) => { e.stopPropagation(); setDeleteId(p.id); }} className="p-3 bg-slate-50 rounded-2xl hover:text-red-500 border border-slate-100 shadow-sm"><Icon name="trash-2" size={20}/></button>
-                                            </div>
+                        <div className="flex justify-between items-center mb-10">
+                            <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter border-l-8 border-cyan-600 pl-4">Audit & Inspections</h2>
+                            <button onClick={createProject} className="sm:hidden bg-cyan-600 p-3 rounded-full text-white shadow-xl"><Icon name="plus" /></button>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                            {projects.map(p => (
+                                <div key={p.id} onClick={() => { setCurrentProject(p); setView('editor'); }} className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100 cursor-pointer hover:shadow-2xl hover:border-cyan-400 transition-all relative group overflow-hidden">
+                                    <div className="flex justify-between items-start mb-8">
+                                        <div className="bg-slate-50 text-slate-400 w-14 h-14 rounded-2xl flex items-center justify-center group-hover:bg-slate-900 group-hover:text-cyan-400 transition-all duration-500 shadow-inner"><Icon name="clipboard-check" size={28} /></div>
+                                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-y-[-10px] group-hover:translate-y-0">
+                                            <button onClick={(e) => { e.stopPropagation(); downloadPDF(p); }} className="p-3 bg-slate-50 rounded-xl hover:text-cyan-600 border border-slate-100 shadow-sm"><Icon name="printer" size={18}/></button>
+                                            <button onClick={(e) => { e.stopPropagation(); setDeleteId(p.id); }} className="p-3 bg-slate-50 rounded-xl hover:text-red-500 border border-slate-100 shadow-sm"><Icon name="trash-2" size={18}/></button>
                                         </div>
-                                        <h3 className="font-extrabold uppercase text-slate-900 truncate text-xl mb-2 leading-tight group-hover:text-cyan-700">{p.projectName}</h3>
-                                        <div className="flex items-center gap-2 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
-                                            <Icon name="calendar" size={14} className="text-cyan-500" /> {p.date}
-                                        </div>
-                                        <div className="mt-10 pt-6 border-t border-slate-50 flex items-center justify-between text-[11px] font-black uppercase text-slate-400 tracking-widest group-hover:text-cyan-600">Ouvrir le dossier <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-cyan-600 group-hover:text-white transition-all shadow-sm">→</div></div>
                                     </div>
-                                ))
-                            )}
+                                    <h3 className="font-extrabold uppercase text-slate-900 truncate text-xl mb-1">{p.projectName}</h3>
+                                    <div className="flex items-center gap-2 text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-6">
+                                        <Icon name="calendar" size={12} className="text-cyan-500" /> {p.date}
+                                    </div>
+                                    <div className="flex items-center justify-between mt-auto">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 rounded-full bg-cyan-100 flex items-center justify-center text-[10px] font-black text-cyan-600 uppercase">L</div>
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic">{p.authorName || "Expert"}</span>
+                                        </div>
+                                        <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-cyan-600 group-hover:text-white transition-all">→</div>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     </main>
+
                     {deleteId && (
-                        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md flex items-center justify-center z-[100] p-4">
-                            <div className="bg-white p-12 rounded-[3.5rem] max-w-sm w-full text-center shadow-2xl">
+                        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md flex items-center justify-center z-[100] p-4">
+                            <div className="bg-white p-12 rounded-[3.5rem] max-w-sm w-full text-center shadow-2xl border border-slate-100">
                                 <Icon name="alert-triangle" className="text-red-500 mx-auto mb-6" size={56} />
-                                <h3 className="text-2xl font-extrabold mb-4 uppercase text-slate-900 leading-none">Supprimer ce dossier ?</h3>
-                                <p className="text-slate-500 text-sm mb-10 leading-relaxed font-medium">Les données techniques et photos associées seront définitivement perdues.</p>
+                                <h3 className="text-2xl font-extrabold mb-4 uppercase text-slate-900 leading-none">Confirmer ?</h3>
+                                <p className="text-slate-500 text-sm mb-10 leading-relaxed font-medium">Ce dossier technique sera supprimé du serveur.</p>
                                 <div className="flex gap-4">
-                                    <button onClick={() => setDeleteId(null)} className="flex-1 py-4 bg-slate-100 rounded-2xl font-bold uppercase text-xs tracking-widest text-slate-400">Annuler</button>
-                                    <button onClick={async () => { await db.collection('artifacts').doc(AppId).collection('public').doc('data').collection('inspections').doc(deleteId).delete(); setDeleteId(null); }} className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-bold uppercase text-xs tracking-widest shadow-xl shadow-red-200">Supprimer</button>
+                                    <button onClick={() => setDeleteId(null)} className="flex-1 py-4 bg-slate-100 rounded-2xl font-bold uppercase text-xs tracking-widest">Non</button>
+                                    <button onClick={async () => { await db.collection('artifacts').doc(AppId).collection('public').doc('data').collection('inspections').doc(deleteId).delete(); setDeleteId(null); }} className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-bold uppercase text-xs tracking-widest shadow-xl">Oui</button>
                                 </div>
                             </div>
                         </div>
@@ -260,27 +296,27 @@
 
             // --- VUE ÉDITEUR ---
             return (
-                <div className="min-h-screen">
+                <div className="min-h-screen pb-32">
                     <header className="bg-white/95 backdrop-blur-xl border-b h-20 sticky top-0 z-40 px-8 flex items-center justify-between shadow-sm">
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-6">
                             <button onClick={() => setView('dashboard')} className="p-3.5 hover:bg-slate-100 rounded-2xl text-slate-500 border active:scale-90 shadow-sm transition-all"><Icon name="chevron-left" /></button>
-                            <div className="hidden sm:block">
-                                <h2 className="font-extrabold uppercase text-[12px] tracking-widest text-slate-900 truncate max-w-[250px]">{currentProject.projectName}</h2>
+                            <div>
+                                <h2 className="font-extrabold uppercase text-[12px] tracking-widest text-slate-900 truncate max-w-[200px]">{currentProject.projectName}</h2>
                                 <div className="flex items-center gap-2 mt-0.5">
                                     <div className={`w-1.5 h-1.5 rounded-full ${isSaving ? 'bg-cyan-500 animate-ping' : 'bg-green-500'}`}></div>
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{isSaving ? 'Synchronisation...' : 'Données sécurisées'}</span>
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{isSaving ? 'Synchronisation...' : 'Sécurisé'}</span>
                                 </div>
                             </div>
                         </div>
-                        <button onClick={() => downloadPDF(currentProject)} className="btn-premium bg-[#0F172A] text-white px-6 py-2.5 rounded-2xl font-extrabold uppercase text-[10px] flex items-center gap-3 shadow-xl active:scale-95 transition-all border border-slate-700">
+                        <button onClick={() => downloadPDF(currentProject)} className="bg-[#0F172A] text-white px-6 py-2.5 rounded-2xl font-extrabold uppercase text-[10px] flex items-center gap-3 shadow-xl active:scale-95 transition-all">
                             <Icon name="file-down" size={18} className="text-cyan-400"/> Exporter PDF
                         </button>
                     </header>
 
-                    <main className="max-w-4xl mx-auto px-6 py-12 pb-48">
+                    <main className="max-w-4xl mx-auto px-6 py-12">
                         <div className="bg-white p-12 rounded-[3.5rem] shadow-sm border border-slate-100 mb-12 grid grid-cols-1 md:grid-cols-2 gap-10">
                             <div className="space-y-2">
-                                <label className="text-[10px] font-extrabold text-cyan-600 uppercase tracking-[0.2em] ml-1">Libellé du Chantier</label>
+                                <label className="text-[10px] font-extrabold text-cyan-600 uppercase tracking-[0.2em] ml-1">Nom du Projet</label>
                                 <input type="text" value={currentProject.projectName} onChange={e => { const v = e.target.value.toUpperCase(); setCurrentProject({...currentProject, projectName: v}); handleUpdate({projectName: v}); }} className="w-full bg-slate-50 p-5 rounded-[1.5rem] font-bold text-slate-900 uppercase focus:ring-2 focus:ring-cyan-500 outline-none transition-all shadow-inner border-transparent" />
                             </div>
                             <div className="space-y-2">
@@ -291,7 +327,7 @@
 
                         {currentProject.sections.map(s => (
                             <div key={s.id} className="bg-white rounded-[3rem] border border-slate-100 mb-16 overflow-hidden shadow-sm">
-                                <div className="bg-[#0F172A] text-white px-10 py-6 flex items-center gap-5 border-l-[18px] border-cyan-500 shadow-md tracking-[0.3em] uppercase font-extrabold text-[11px]">{s.title}</div>
+                                <div className="bg-[#0F172A] text-white px-10 py-6 flex items-center gap-5 border-l-[18px] border-cyan-500 tracking-[0.3em] uppercase font-extrabold text-[11px] shadow-md">{s.title}</div>
                                 <div className="divide-y divide-slate-100">
                                     {s.items.map(item => (
                                         <div key={item.id} className="p-12 hover:bg-slate-50/50 transition-colors">
@@ -302,7 +338,7 @@
                                                         <button key={st} onClick={() => {
                                                             const newS = currentProject.sections.map(sec => sec.id === s.id ? {...sec, items: sec.items.map(i => i.id === item.id ? {...i, status: st} : i)} : sec);
                                                             setCurrentProject({...currentProject, sections: newS}); handleUpdate({sections: newS});
-                                                        }} className={`px-6 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all ${item.status === st ? 'bg-cyan-600 text-white shadow-xl shadow-cyan-200 scale-105' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
+                                                        }} className={`px-6 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all ${item.status === st ? 'bg-cyan-600 text-white shadow-xl scale-105' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
                                                             {st === 'ok' ? 'Conforme' : st === 'issue' ? 'Réserve' : 'N/A'}
                                                         </button>
                                                     ))}
@@ -316,14 +352,14 @@
                                             <div className="flex flex-wrap gap-5">
                                                 {(item.photos || []).map((ph, idx) => (
                                                     <div key={idx} className="relative group w-28 h-28 rounded-3xl overflow-hidden border-4 border-white shadow-xl transform hover:scale-110 transition-transform cursor-pointer">
-                                                        <img src={ph} className="w-full h-full object-cover" alt="site-photo" />
+                                                        <img src={ph} className="w-full h-full object-cover" />
                                                         <button onClick={() => {
                                                             const newS = currentProject.sections.map(sec => sec.id === s.id ? {...sec, items: sec.items.map(i => i.id === item.id ? {...i, photos: i.photos.filter((_, pi) => pi !== idx)} : i)} : sec);
                                                             setCurrentProject({...currentProject, sections: newS}); handleUpdate({sections: newS});
                                                         }} className="absolute inset-0 bg-red-600/70 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all"><Icon name="x" size={24}/></button>
                                                     </div>
                                                 ))}
-                                                <button onClick={() => { setActiveItem({sId:s.id, iId:item.id}); fileInputRef.current.click(); }} className="w-28 h-28 border-4 border-dashed border-slate-200 rounded-[2rem] flex flex-col items-center justify-center text-slate-300 bg-slate-50 hover:text-cyan-600 hover:border-cyan-400 transition-all hover:shadow-inner">
+                                                <button onClick={() => { setActiveItem({sId:s.id, iId:item.id}); fileInputRef.current.click(); }} className="w-28 h-28 border-4 border-dashed border-slate-200 rounded-[2rem] flex flex-col items-center justify-center text-slate-300 bg-slate-50 hover:text-cyan-600 transition-all shadow-inner">
                                                     <Icon name="camera" size={32} />
                                                     <span className="text-[8px] font-black uppercase mt-1 tracking-tighter">Photo</span>
                                                 </button>
@@ -336,13 +372,13 @@
 
                         <div className="bg-white p-16 rounded-[4rem] border border-slate-100 shadow-xl">
                              <div className="flex items-center gap-3 mb-10 px-2 border-l-[10px] border-[#0F172A]">
-                                <h2 className="text-[13px] font-black uppercase text-slate-900 tracking-[0.4em]">Synthèse Finale & Conclusions QSE</h2>
+                                <h2 className="text-[13px] font-black uppercase text-slate-900 tracking-[0.4em]">Synthèse Finale & Conclusions</h2>
                              </div>
-                             <textarea rows="6" value={currentProject.observations} onChange={e => { const v = e.target.value; setCurrentProject({...currentProject, observations: v}); handleUpdate({observations: v}); }} className="w-full bg-slate-50 p-12 rounded-[2.5rem] font-bold text-slate-800 leading-relaxed outline-none shadow-inner text-lg border-transparent focus:ring-2 focus:ring-cyan-500 transition-all" placeholder="Rédigez ici votre synthèse de conformité globale pour le client..." />
+                             <textarea rows="6" value={currentProject.observations} onChange={e => { const v = e.target.value; setCurrentProject({...currentProject, observations: v}); handleUpdate({observations: v}); }} className="w-full bg-slate-50 p-12 rounded-[2.5rem] font-bold text-slate-800 leading-relaxed outline-none shadow-inner text-lg border-transparent focus:ring-2 focus:ring-cyan-500 transition-all" placeholder="Rédigez ici votre synthèse finale..." />
                         </div>
                     </main>
 
-                    {/* --- ZONE DE CAPTURE PDF (STRUCTURE RIGIDE PREMIUM) --- */}
+                    {/* PDF CAPTURE AREA */}
                     <div id="pdf-render-zone">
                         <div id="pdf-layout" style={{ width: '210mm', minHeight: '297mm', padding: '15mm', boxSizing: 'border-box', color: '#0F172A', backgroundColor: '#FFFFFF' }}>
                             {currentProject && (
@@ -354,57 +390,47 @@
                                         </div>
                                         <div style={{ textAlign: 'right', fontSize: '10px', color: '#94A3B8', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.2em' }}>DOCUMENT TECHNIQUE<br/>CERTIFIÉ SITECHECK</div>
                                     </div>
-
                                     <table style={{ width: '100%', marginBottom: '45px', border: '5px solid #0F172A', borderCollapse: 'collapse' }}>
                                         <tbody>
                                             <tr>
                                                 <td style={{ width: '60%', padding: '25px', border: '5px solid #0F172A' }}>
-                                                    <p style={{ fontSize: '9px', fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.2em' }}>SITE / CHANTIER CONCERNÉ</p>
-                                                    <p style={{ fontSize: '26px', fontWeight: '900', textTransform: 'uppercase', lineHeight: '1.1', color: '#0F172A' }}>{currentProject.projectName}</p>
+                                                    <p style={{ fontSize: '9px', fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.2em' }}>CHANTIER / PROJET</p>
+                                                    <p style={{ fontSize: '26px', fontWeight: '900', textTransform: 'uppercase', lineHeight: '1.1' }}>{currentProject.projectName}</p>
                                                 </td>
                                                 <td style={{ padding: '25px', backgroundColor: '#F8FAFC', border: '5px solid #0F172A' }}>
                                                     <p style={{ fontSize: '9px', fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase', marginBottom: '8px' }}>DATE D'INSPECTION</p>
-                                                    <p style={{ fontSize: '22px', fontWeight: '900', color: '#0F172A' }}>{currentProject.date}</p>
-                                                    <p style={{ fontSize: '10px', fontWeight: '900', marginTop: '15px', color: '#334155' }}>AUDITEUR : LYES</p>
+                                                    <p style={{ fontSize: '22px', fontWeight: '900' }}>{currentProject.date}</p>
                                                 </td>
                                             </tr>
                                         </tbody>
                                     </table>
-
                                     {currentProject.sections.map(s => (
                                         <div key={s.id} className="page-break-avoid" style={{ marginBottom: '40px' }}>
-                                            <div style={{ backgroundColor: '#0F172A', color: 'white', padding: '16px 30px', fontWeight: '900', textTransform: 'uppercase', fontSize: '14px', borderRadius: '15px', borderLeft: '22px solid #0891B2', marginBottom: '30px', boxShadow: '0 8px 15px rgba(0,0,0,0.1)' }}>{s.title}</div>
+                                            <div style={{ backgroundColor: '#0F172A', color: 'white', padding: '16px 30px', fontWeight: '900', textTransform: 'uppercase', fontSize: '14px', borderRadius: '15px', borderLeft: '22px solid #0891B2', marginBottom: '30px' }}>{s.title}</div>
                                             {s.items.map(item => (
                                                 <div key={item.id} className="page-break-avoid" style={{ borderBottom: '2px solid #F1F5F9', paddingBottom: '30px', marginBottom: '30px' }}>
                                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-                                                        <p style={{ fontSize: '20px', fontWeight: '900', textTransform: 'uppercase', color: '#0F172A', width: '70%', lineHeight: '1.1', letterSpacing: '-0.01em' }}>{item.label}</p>
-                                                        <div style={{ padding: '12px 24px', border: '4px solid #0F172A', fontWeight: '900', fontSize: '11px', borderRadius: '14px', textAlign: 'center', backgroundColor: '#F8FAFC', textTransform: 'uppercase' }}>{item.status}</div>
+                                                        <p style={{ fontSize: '20px', fontWeight: '900', textTransform: 'uppercase', color: '#0F172A', width: '70%', lineHeight: '1.1' }}>{item.label}</p>
+                                                        <div style={{ padding: '12px 24px', border: '4px solid #0F172A', fontWeight: '900', fontSize: '11px', borderRadius: '14px', textAlign: 'center', backgroundColor: '#F8FAFC' }}>{item.status.toUpperCase()}</div>
                                                     </div>
-                                                    {item.comment && <p style={{ fontSize: '16px', fontStyle: 'italic', color: '#475569', marginBottom: '25px', paddingLeft: '20px', borderLeft: '6px solid #CBD5E1', fontWeight: '600', lineHeight: 1.5 }}>"{item.comment}"</p>}
+                                                    {item.comment && <p style={{ fontSize: '16px', fontStyle: 'italic', color: '#475569', marginBottom: '25px', paddingLeft: '20px', borderLeft: '6px solid #CBD5E1', fontWeight: '600' }}>"{item.comment}"</p>}
                                                     {item.photos?.length > 0 && (
                                                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px', marginTop: '20px' }}>
-                                                            {item.photos.map((ph, i) => <div key={i} style={{ borderRadius: '30px', border: '8px solid #F8FAFC', height: '70mm', overflow: 'hidden', boxShadow: '0 12px 20px rgba(0,0,0,0.06)' }}><img src={ph} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div>)}
+                                                            {item.photos.map((ph, i) => <div key={i} style={{ borderRadius: '30px', border: '8px solid #F8FAFC', height: '65mm', overflow: 'hidden' }}><img src={ph} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div>)}
                                                         </div>
                                                     )}
                                                 </div>
                                             ))}
                                         </div>
                                     ))}
-
                                     <div className="page-break-avoid" style={{ marginTop: '70px', borderTop: '12px solid #0F172A', paddingTop: '50px', textAlign: 'center' }}>
-                                        <h3 style={{ fontSize: '18px', fontWeight: '900', color: '#0891B2', textTransform: 'uppercase', marginBottom: '30px', letterSpacing: '0.4em' }}>CONCLUSION & SYNTHÈSE GLOBALE</h3>
-                                        <p style={{ fontSize: '22px', fontWeight: '900', fontStyle: 'italic', backgroundColor: '#0F172A', color: '#FFFFFF', padding: '60px', borderRadius: '55px', lineHeight: 1.6, boxShadow: '0 25px 40px rgba(0,0,0,0.1)' }}>"{currentProject.observations || "Contrôle validé par l'auditeur. Aucune réserve majeure à signaler ce jour."}"</p>
+                                        <h3 style={{ fontSize: '18px', fontWeight: '900', color: '#0891B2', textTransform: 'uppercase', marginBottom: '30px', letterSpacing: '0.4em' }}>CONCLUSIONS GÉNÉRALES</h3>
+                                        <p style={{ fontSize: '22px', fontWeight: '900', fontStyle: 'italic', backgroundColor: '#0F172A', color: '#FFFFFF', padding: '60px', borderRadius: '55px' }}>"{currentProject.observations || "Site conforme aux protocoles."}"</p>
                                         <div style={{ marginTop: '90px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '60px' }}>
-                                            <div style={{ borderTop: '4px solid #F1F5F9', paddingTop: '20px' }}>
-                                                <p style={{ fontSize: '11px', fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '120px' }}>VISA INGÉNIEUR QSE LYES</p>
-                                                <p style={{ fontSize: '10px', color: '#0891B2', fontWeight: '900', textTransform: 'uppercase', fontStyle: 'italic' }}>Document Scellé Numériquement</p>
-                                            </div>
-                                            <div style={{ borderTop: '4px solid #F1F5F9', paddingTop: '20px', textAlign: 'right' }}>
-                                                <p style={{ fontSize: '11px', fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '120px' }}>VISA DIRECTION CHANTIER</p>
-                                            </div>
+                                            <div style={{ borderTop: '4px solid #F1F5F9', paddingTop: '20px' }}><p style={{ fontSize: '11px', fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase', marginBottom: '120px' }}>VISA INGÉNIEUR QSE LYES</p></div>
+                                            <div style={{ borderTop: '4px solid #F1F5F9', paddingTop: '20px', textAlign: 'right' }}><p style={{ fontSize: '11px', fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase', marginBottom: '120px' }}>VISA DIRECTION CHANTIER</p></div>
                                         </div>
                                     </div>
-                                    <footer style={{ marginTop: '140px', borderTop: '1px solid #EEE', paddingTop: '40px', textAlign: 'center', fontSize: '10px', fontWeight: '900', color: '#CBD5E1', letterSpacing: '0.7em', textTransform: 'uppercase' }}>INGÉNIEUR QSE LYES • BUREAU TECHNIQUE • DOCUMENT OFFICIEL</footer>
                                 </>
                             )}
                         </div>
@@ -412,15 +438,8 @@
 
                     {isDownloading && (
                         <div className="fixed inset-0 bg-slate-950/98 backdrop-blur-3xl flex flex-col items-center justify-center z-[500] text-white">
-                            <div className="relative w-32 h-32 mb-10">
-                                <div className="absolute inset-0 border-4 border-cyan-500/20 rounded-full"></div>
-                                <div className="absolute inset-0 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                    <Icon name="shield-check" className="text-cyan-500" size={40} />
-                                </div>
-                            </div>
-                            <h3 className="text-3xl font-black uppercase tracking-tighter">Compilation PDF Finale...</h3>
-                            <p className="text-slate-500 italic mt-4 font-bold animate-pulse uppercase tracking-widest text-xs">Traitement des preuves photographiques en cours</p>
+                            <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+                            <h3 className="text-2xl font-black uppercase tracking-tighter">Édition PDF Finale...</h3>
                         </div>
                     )}
                     <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handlePhoto} />
