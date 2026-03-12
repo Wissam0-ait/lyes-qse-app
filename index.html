@@ -40,11 +40,14 @@ import {
 // --- CONFIGURATION FIREBASE ---
 // Note: Ces variables sont fournies par l'environnement de test. 
 // Pour Vercel, remplacez par votre propre configuration JSON.
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'sitecheck-lyes-qse-pro';
+const firebaseConfig = {
+            apiKey: "AIzaSyBq9OHMv0eIx6p2eSLXlYIZr0I0XXf57vM",
+            authDomain: "lyes-a5acb.firebaseapp.com",
+            projectId: "lyes-a5acb",
+            storageBucket: "lyes-a5acb.firebasestorage.app",
+            messagingSenderId: "454363812073",
+            appId: "1:454363812073:web:0e6ebbba8ae112a921a078"
+        };
 
 const DEFAULT_SECTIONS = [
   {
